@@ -5,6 +5,7 @@ import rospy
 import numpy as np
 from .utils import RealtimeBuffer, get_ros_param, State2D, GeneratePwm
 
+
 from racecar_msgs.msg import ServoMsg 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped
@@ -76,7 +77,7 @@ class PurePursuitController():
         #   - subscribes to the topic <self.control_topic>
         #   - has message type <ServoMsg> (racecar_msgs.msg.Odometry) 
         #   - with queue size 1
-        self.control_pub = None # TO BE FILLED
+        self.control_pub = rospy.Publisher(self.control_topic, ServoMsg, queue_size = 1)
         ########################### END OF TODO 1#################################
         
             
@@ -93,6 +94,7 @@ class PurePursuitController():
         #   - has message type <Odometry> (nav_msgs.msg.Odometry) 
         #   - with callback function <self.odometry_callback>, which has already been implemented
         #   - with queue size 1
+        rospy.Subscriber(self.odom_topic, Odometry, self.odometry_callback, queue_size=1)
         ########################### END OF TODO 2#################################
         
     def odometry_callback(self, odom_msg: Odometry):
@@ -123,10 +125,11 @@ class PurePursuitController():
         #   and create a 3-dim numpy array [x,y,1]
         # 3. add the goal to the buffer (self.goal_buffer)
         
-        goal_x = np.nan # TO BE FILLED
-        goal_y = np.nan # TO BE FILLED
+        goal_x = goal_msg.pose.position.x
+        goal_y = goal_msg.pose.position.y # TO BE FILLED
+        self.goal_buffer.writeFromNonRT(np.array([goal_x, goal_y, 1]))
         
-        ########################### END OF TODO 3 #################################
+        ########################## END OF TODO 3 #################################
         # Log the goal to the console using "rospy.loginfo"
         rospy.loginfo(f"Received a new goal [{np.round(goal_x, 3)}, {np.round(goal_y,3)}]")
         
@@ -154,6 +157,12 @@ class PurePursuitController():
         # 2. Set the header time to the current time
         # 3. Set the throttle and steering angle to the servo message
         # 4. Publish the servo message
+        msg = ServoMsg()
+        msg.header.stamp=rospy.Time.now()
+        msg.throttle = throttle 
+        msg.steer = steer
+        self.control_pub.publish(msg)
+
         
         ########################### END OF TODO 4 #################################
 
@@ -205,9 +214,24 @@ class PurePursuitController():
                     #
                     # 5. clip the steering angle between "-self.steer_max" and "self.steer_max"
                     # 6. apply the simple proportional controller for the acceleration to track the reference_velocity
+                    if dis2goal < self.stop_distance:
+                         accel = -1 # TO BE FILLED 
+                         steer = 0 # TO BE FILLED
+                         continue
                     
-                    accel = 0 # TO BE FILLED 
-                    steer = 0 # TO BE FILLED
+                    if abs(alpha) > np.pi/2:
+                        steer = self.max_steer
+                        reference_velocity = self.max_vel
+                    
+                    else:
+                        steer = np.arctan(2*self.wheel_base*np.sin(alpha)/min(self.ld_max, dis2goal))
+                        reference_velocity = min(self.max_vel, dis2goal-self.stop_distance)
+                    
+                    if abs(steer) > self.max_steer:
+                        steer *= self.max_steer/steer
+                    accel = self.throttle_gain*(reference_velocity - vel_cur)
+
+                    
                     ########################### END OF TODO 5 ###########################################
                     
                     # publish the control
