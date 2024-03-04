@@ -169,7 +169,7 @@ class ILQR():
 		print(obs_refs)
 		'''
 		q, r, Q, R, H = self.cost.get_derivatives_np(nom_traj, nom_control, path_refs, obs_refs)
-		Q = np.nan_to_num(Q)
+		#Q = np.nan_to_num(Q)
 		A, B = self.dyn.get_jacobian_np(nom_traj, nom_control)
 		
 		#print(np.shape(A))
@@ -179,6 +179,10 @@ class ILQR():
 		
 		
 		p, P = q[:,self.T-1], Q[:,:,self.T-1]
+		#print(q[:,self.T])
+		#print()
+		#print(Q[:,:,self.T])
+		#raise Exception('')
 		t = self.T - 1
 
 		#print(np.shape(p))
@@ -191,7 +195,7 @@ class ILQR():
 		#print(np.shape(K_arr))
 
 		while t >= 0:
-			print(t)
+			#print(t)
 			'''
 			try:
 				#q, r, Q, R, H = self.cost.get_derivatives_np(nom_traj[:, :t], nom_control[:, :t], path_refs[:, :t], obs_refs[:, :, :t])
@@ -206,6 +210,10 @@ class ILQR():
 				raise Exception("fools")
 			'''
 			#try:
+			if np.any(np.isnan(Q[:,:,t])):
+				print('backward loop failed at t = %d' %t)
+				print(Q[:,:,t])
+				raise Exception('found the nan')
 			Q_xt = q[:,t] + A[:,:,t].T@p
 			#except:
 				#print(q)
@@ -224,11 +232,12 @@ class ILQR():
 			#print(Q_reg_uut.shape)
 			if  not np.all(np.linalg.eigvals(Q_reg_uut) > 0):
                 
-				if lam < 100:
+				if lam < 200:
 					lam = lam * a
-				t = self.T - 1
+					t = self.T - 1
+					continue
 				#print(lam)
-				continue
+				break
 
 			K = -np.linalg.inv(Q_reg_uut)@Q_reg_uxt
 			k = -np.linalg.inv(Q_reg_uut)@Q_ut
@@ -350,14 +359,20 @@ class ILQR():
 		lam = 1       #lambda_0
 		J_new = np.infty
 		status = 0
+		counter = 1
 		while (abs(J_new - J) > 0.001):
-			J = J_new
-			K_arr, k_arr, lam = self.backward_pass(trajectory, controls, lam, path_refs, obs_refs)
+			#J = J_new
+			try:
+				K_arr, k_arr, lam = self.backward_pass(trajectory, controls, lam, path_refs, obs_refs)
+			except:
+				print('failed on iteration %d' % counter)
+				raise Exception('found the nans')
 			trajectory, controls, J_new = self.forward_pass(trajectory, controls, J, K_arr, k_arr, path_refs, obs_refs)
 			if J_new > J:
 				status = -1
 				break
-
+			J = J_new
+			counter += 1
 		t_process = time.time() - t_start
 		solver_info = dict(
 				t_process=t_process, # Time spent on planning
