@@ -183,7 +183,7 @@ class ILQR():
 		#print()
 		#print(Q[:,:,self.T])
 		#raise Exception('')
-		t = self.T - 1
+		t = self.T - 2
 
 		#print(np.shape(p))
 		#print()
@@ -234,12 +234,11 @@ class ILQR():
                 
 				if lam < self.max_attempt:
 					lam = lam * self.reg_scale_up
-					t = self.T - 1
-					#p = q[:, self.T-1]
-					#P = Q[:,:,self.T-1]
+					t = self.T - 2
+					p = q[:, self.T-1]
+					P = Q[:,:,self.T-1]
 					continue
 				#print(lam)
-				break
 
 			K = -np.linalg.inv(Q_reg_uut)@Q_reg_uxt
 			k = -np.linalg.inv(Q_reg_uut)@Q_ut
@@ -363,6 +362,8 @@ class ILQR():
 		status = 0
 		first = True
 	
+
+		'''
 		while (abs(J_new - J) > 1e-5):
 			if not first:
 				J = J_new
@@ -379,6 +380,39 @@ class ILQR():
 
 			if first:
 				first = False
+		'''
+		converged = False
+		for _ in range(self.max_iter):
+			K_arr, k_arr, lam = self.backward_pass(trajectory, controls, lam, path_refs, obs_refs)
+			changed = False
+			for alpha in self.alphas:
+				x_arr = np.empty_like(trajectory)
+				u_arr = np.empty_like(controls)
+				x_arr[:, 0] = trajectory[:,0]
+				for t in range(0, self.T-1):
+					u_arr[:, t] = controls[:, t] + K_arr[:, :, t] @ (x_arr[:,t] - trajectory[:, t]) + alpha*k_arr[:, t]
+					x_arr[:, t + 1], u_arr[:, t] = self.dyn.integrate_forward_np(x_arr[:, t], u_arr[:, t])
+
+				Jnew = self.cost.get_traj_cost(x_arr, u_arr, path_refs, obs_refs)
+				if Jnew <= J:
+					if abs(Jnew-J) < self.tol:
+						converged = True
+					J = Jnew
+					trajectory = x_arr
+					controls = u_arr
+					changed = True
+					break
+			if not changed:
+				status = -1
+				break
+			if converged:
+				break
+
+		if not converged:
+			status = -1
+
+				
+
 
 		t_process = time.time() - t_start
 		solver_info = dict(
