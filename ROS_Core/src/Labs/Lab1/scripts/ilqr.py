@@ -133,7 +133,7 @@ class ILQR():
 
 
 	def forward_pass(self, nom_traj, nom_control, J_bar, K_arr, k_arr, path_refs, obs_refs, init_alpha = 0.5, rho=0.0001, epsilon = 0.9):
-		alpha = init_alpha
+		alpha = 0.1
 
 		x_arr = np.empty_like(nom_traj)
 		u_arr = np.empty_like(nom_control)
@@ -232,9 +232,11 @@ class ILQR():
 			#print(Q_reg_uut.shape)
 			if  not np.all(np.linalg.eigvals(Q_reg_uut) > 0):
                 
-				if lam < 200:
-					lam = lam * a
+				if lam < self.max_attempt:
+					lam = lam * self.reg_scale_up
 					t = self.T - 1
+					#p = q[:, self.T-1]
+					#P = Q[:,:,self.T-1]
 					continue
 				#print(lam)
 				break
@@ -250,7 +252,7 @@ class ILQR():
 			
 			t = t - 1
 
-		return K_arr, k_arr, b*lam 
+		return K_arr, k_arr, max(self.reg_min, lam*self.reg_scale_down)
 
 
 
@@ -356,23 +358,28 @@ class ILQR():
         
         ########################### #END of TODO 1 #####################################
 
-		lam = 1       #lambda_0
+		lam = self.reg_init      #lambda_0
 		J_new = np.infty
 		status = 0
-		counter = 1
-		while (abs(J_new - J) > 0.001):
+		first = True
+	
+		while (abs(J_new - J) > 1e-5):
+			if not first:
+				J = J_new
 			#J = J_new
 			try:
 				K_arr, k_arr, lam = self.backward_pass(trajectory, controls, lam, path_refs, obs_refs)
 			except:
-				print('failed on iteration %d' % counter)
+				#print('failed on iteration %d' % counter)
 				raise Exception('found the nans')
 			trajectory, controls, J_new = self.forward_pass(trajectory, controls, J, K_arr, k_arr, path_refs, obs_refs)
 			if J_new > J:
 				status = -1
 				break
-			J = J_new
-			counter += 1
+
+			if first:
+				first = False
+
 		t_process = time.time() - t_start
 		solver_info = dict(
 				t_process=t_process, # Time spent on planning
