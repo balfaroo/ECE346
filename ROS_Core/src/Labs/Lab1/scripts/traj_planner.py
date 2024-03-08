@@ -215,9 +215,28 @@ class TrajectoryPlanner():
         ###############################
         # Implement your control law here using ILQR policy
         # Hint: make sure that the difference in heading is between [-pi, pi]
+        dif = x - x_ref
+        #heading_dif = dif[3]
+        '''
         
-        accel = 0 # TO BE REPLACED
-        steer_rate = 0 # TO BE REPLACED
+        while heading_dif > np.pi:
+            heading_dif = heading_dif - 2 * np.pi
+        while heading_dif < -np.pi:
+            heading_dif = heading_dif + 2 * np.pi
+        
+        heading_dif = heading_dif % 2*np.pi
+        if heading_dif > np.pi:
+            heading_dif -= 2*np.pi
+        if abs(heading_dif) > np.pi:
+            print('error in heading')
+        #dif[3] = heading_dif
+        '''
+        dif[3] = np.mod(dif[3] + np.pi, 2*np.pi) - np.pi
+
+        u = u_ref + K_closed_loop@dif
+        accel = u[0] # TO BE REPLACED
+        steer_rate = u[1] # TO BE REPLACED
+
 
         ##### END OF TODO ##############
 
@@ -381,7 +400,7 @@ class TrajectoryPlanner():
                 # stop when the progress is not increasing
                 while (progress - prev_progress)*new_path.length > 1e-3: # stop when the progress is not increasing
                     nominal_trajectory.append(state)
-                    new_plan = self.planner.plan(state, None)#, verbose=False)
+                    new_plan = self.planner.plan(state, None)
                     nominal_controls.append(new_plan['controls'][:,0])
                     K_closed_loop.append(new_plan['K_closed_loop'][:,:,0])
                     
@@ -422,6 +441,7 @@ class TrajectoryPlanner():
         
         rospy.loginfo('Receding Horizon Planning thread started waiting for ROS service calls...')
         t_last_replan = 0
+        u0 = None
         while not rospy.is_shutdown():
             ###############################
             #### TODO: Task 3 #############
@@ -449,6 +469,45 @@ class TrajectoryPlanner():
                 - Publish the new policy for RVIZ visualization
                     for example: self.trajectory_pub.publish(new_policy.to_msg())       
             '''
+
+
+             # 1
+            replan = (self.plan_state_buffer.new_data_available and rospy.get_rostime().to_sec() - t_last_replan > self.replan_dt) and self.planner_ready
+            #rospy.loginfo('checked for replan done')
+            # 2
+            #new_plan = dict(status=-1)
+            if replan:
+                state_cur = self.plan_state_buffer.readFromRT()[:-1]
+                prev_policy = self.policy_buffer.readFromRT()
+                u0 = None
+               
+                if prev_policy is not None:
+                    #self.policy_buffer.reset() 
+                    #time.sleep(2) # wait for 2 seconds to make sure the car is stopped
+                    u0 = prev_policy.get_ref_controls(rospy.get_rostime().to_sec()-1)
+                if self.path_buffer.new_data_available:
+                    new_path = self.path_buffer.readFromRT()
+                    self.planner.update_ref_path(new_path)
+                    new_plan = self.planner.plan(state_cur, u0)
+            # 3
+                #rospy.loginfo('done with new plan')
+                    print(new_plan.get('status'))
+                    if new_plan.get('status') == 0:
+                            #rospy.loginfo('Planning a new policy...')
+                        print('export new policy')
+                        new_policy = Policy(X = new_plan.get('trajectory'),
+                                            U = new_plan.get('controls'),
+                                            K = new_plan.get('K_closed_loop'),
+                                            t0 = rospy.get_rostime().to_sec(),
+                                            dt = self.planner.dt,
+                                            T = new_plan.get('trajectory').shape[-1])
+                        self.policy_buffer.writeFromNonRT(new_policy)
+                        self.trajectory_pub.publish(new_policy.to_msg())
+        
+            
+        
+                        t_last_replan = rospy.get_rostime().to_sec() 
+                    #rospy.loginfo('Done Planning a new policy...')
             ###############################
             #### END OF TODO #############
             ###############################

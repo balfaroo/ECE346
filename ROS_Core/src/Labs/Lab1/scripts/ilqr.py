@@ -169,25 +169,10 @@ class ILQR():
 		print(obs_refs)
 		'''
 		q, r, Q, R, H = self.cost.get_derivatives_np(nom_traj, nom_control, path_refs, obs_refs)
-		#Q = np.nan_to_num(Q)
 		A, B = self.dyn.get_jacobian_np(nom_traj, nom_control)
 		
-		#print(np.shape(A))
-		#print(A)
-		#print(np.shape(B))
-		#print(B)
-		
-		
 		p, P = q[:,self.T-1], Q[:,:,self.T-1]
-		#print(q[:,self.T])
-		#print()
-		#print(Q[:,:,self.T])
-		#raise Exception('')
 		t = self.T - 2
-
-		#print(np.shape(p))
-		#print()
-		#print(np.shape(P))
 
 		K_arr = np.zeros((nom_control.shape[0], nom_traj.shape[0], self.T))
 		k_arr = np.zeros((nom_control.shape[0], self.T))
@@ -195,7 +180,6 @@ class ILQR():
 		#print(np.shape(K_arr))
 
 		while t >= 0:
-			#print(t)
 			'''
 			try:
 				#q, r, Q, R, H = self.cost.get_derivatives_np(nom_traj[:, :t], nom_control[:, :t], path_refs[:, :t], obs_refs[:, :, :t])
@@ -209,27 +193,16 @@ class ILQR():
 				print(np.shape(obs_refs[:, :, :t]))
 				raise Exception("fools")
 			'''
-			#try:
-			if np.any(np.isnan(Q[:,:,t])):
-				print('backward loop failed at t = %d' %t)
-				print(Q[:,:,t])
-				raise Exception('found the nan')
+
 			Q_xt = q[:,t] + A[:,:,t].T@p
-			#except:
-				#print(q)
-				#print()
-				#print(p)
-				#raise Exception("fools")
 			Q_ut = r[:,t] + B[:,:,t].T@p
 			Q_xxt = Q[:,:,t] + A[:,:,t].T@P@A[:,:,t]
-			#print(P)
 			Q_uut = R[:,:,t] + B[:,:,t].T@P@B[:,:,t]
 			Q_uxt = H[:,:,t] + B[:,:,t].T@P@A[:,:,t]
 
 			Q_reg_uut = R[:,:,t] + B[:,:,t].T@(P + lam*np.identity(P.shape[0]))@B[:,:,t]
 			Q_reg_uxt = H[:,:,t] + B[:,:,t].T@(P + lam*np.identity(P.shape[0]))@A[:,:,t]
-			#print(Q_reg_uut)
-			#print(Q_reg_uut.shape)
+			
 			if  not np.all(np.linalg.eigvals(Q_reg_uut) > 0):
                 
 				if lam < self.max_attempt:
@@ -238,7 +211,6 @@ class ILQR():
 					p = q[:, self.T-1]
 					P = Q[:,:,self.T-1]
 					continue
-				#print(lam)
 
 			K = -np.linalg.inv(Q_reg_uut)@Q_reg_uxt
 			k = -np.linalg.inv(Q_reg_uut)@Q_ut
@@ -382,6 +354,8 @@ class ILQR():
 				first = False
 		'''
 		converged = False
+		#print('ilqr started')
+
 		for _ in range(self.max_iter):
 			K_arr, k_arr, lam = self.backward_pass(trajectory, controls, lam, path_refs, obs_refs)
 			changed = False
@@ -390,7 +364,9 @@ class ILQR():
 				u_arr = np.empty_like(controls)
 				x_arr[:, 0] = trajectory[:,0]
 				for t in range(0, self.T-1):
-					u_arr[:, t] = controls[:, t] + K_arr[:, :, t] @ (x_arr[:,t] - trajectory[:, t]) + alpha*k_arr[:, t]
+					dif = x_arr[:,t] - trajectory[:,t]
+					dif[3]= np.mod(dif[3] + np.pi, 2*np.pi) - np.pi
+					u_arr[:, t] = controls[:, t] + K_arr[:, :, t] @ dif + alpha*k_arr[:, t]
 					x_arr[:, t + 1], u_arr[:, t] = self.dyn.integrate_forward_np(x_arr[:, t], u_arr[:, t])
 
 				Jnew = self.cost.get_traj_cost(x_arr, u_arr, path_refs, obs_refs)
@@ -402,16 +378,20 @@ class ILQR():
 					controls = u_arr
 					changed = True
 					break
+			if converged:
+				status = 0
+				break
 			if not changed:
 				status = -1
+				print('not changed')
 				break
-			if converged:
-				break
+			
 
 		if not converged:
+			print('not converged')
 			status = -1
 
-				
+		#print('converged')				
 
 
 		t_process = time.time() - t_start
